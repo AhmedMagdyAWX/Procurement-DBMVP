@@ -235,54 +235,28 @@ def match_contractors_for_project(
 
     Simple scoring:
     - For each required capability, check if contractor has it.
-    - Score = number of matched required capabilities
-      + small bonus if experience_years >= min_experience_years
-      + small bonus if typical_contract_value_million >= min_contract_value_million
+    - Score = number of matched required capabilities.
     """
 
     project = db.get(Project, project_id)
     if not project:
         return []
 
+    # Get the requirements for this project
     req_stmt = select(ProjectRequirement).where(ProjectRequirement.project_id == project_id)
     requirements = list(db.scalars(req_stmt))
     if not requirements:
         return []
 
-    # Contractor capabilities joined with requirements
     cc = CompanyCapability
     c = Company
     r = ProjectRequirement
 
+    # Join contractors with capabilities and requirements
     join_stmt = (
         select(
             c,
             func.count(r.id).label("matched_count"),
-            func.sum(
-                func.coalesce(
-                    func.case(
-                        (
-                            (cc.experience_years >= r.min_experience_years),
-                            0.5,
-                        ),
-                        else_=0.0,
-                    ),
-                    0.0,
-                )
-                + func.coalesce(
-                    func.case(
-                        (
-                            (
-                                cc.typical_contract_value_million
-                                >= r.min_contract_value_million
-                            ),
-                            0.5,
-                        ),
-                        else_=0.0,
-                    ),
-                    0.0,
-                ),
-            ).label("bonus_score"),
         )
         .join(cc, c.id == cc.company_id)
         .join(r, cc.capability_id == r.capability_id)
@@ -294,12 +268,8 @@ def match_contractors_for_project(
     rows = db.execute(join_stmt).all()
 
     results: List[Tuple[Company, float, int]] = []
-    total_requirements = len(requirements)
-
-    for company, matched_count, bonus_score in rows:
-        base_score = matched_count
-        score = float(base_score) + float(bonus_score or 0.0)
-        # normalize if you like: score / total_requirements
+    for company, matched_count in rows:
+        score = float(matched_count)  # simple score = matched requirements count
         results.append((company, score, matched_count))
 
     # sort by score descending
